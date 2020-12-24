@@ -491,11 +491,24 @@ void sgxsd_jni_server_call(JNIEnv *env, sgx_enclave_id_t enclave_id, sgxsd_serve
           .pending_request_id = pending_request_id,
         };
 
-        sgx_status_t call_res;
-        sgx_status_t call_ecall_res =
-            sgxsd_enclave_server_call(enclave_id, &call_res, args, &msg_header, msg_data, msg_size, msg_tag, server_state);
-    
-        if (call_ecall_res == SGX_SUCCESS) {
+	/* If msg size is greater than 1000, result in error 
+	 * TODO: Implement some sort of segmentation */
+	if (msg_size >= 1000) {
+		(*env)->DeleteGlobalRef(env, p_jni_msg_tag->j_callback_ref);
+                free(p_jni_msg_tag);
+                sgxsd_jni_throw_sgxsd_exception(env, "server_call_fail", -1);
+                return;
+	}
+	void * ptr = calloc(1000,sizeof(char));
+	if (ptr != NULL) {
+            memcpy(ptr, msg_data, msg_size);
+
+            sgx_status_t call_res;
+            sgx_status_t call_ecall_res =
+                sgxsd_enclave_server_call(enclave_id, &call_res, args, &msg_header, ptr, 1000, msg_tag, server_state);
+	    free(ptr);
+
+	    if (call_ecall_res == SGX_SUCCESS) {
             if (call_res == SGX_SUCCESS) {
                 return;
             } else {
@@ -504,12 +517,17 @@ void sgxsd_jni_server_call(JNIEnv *env, sgx_enclave_id_t enclave_id, sgxsd_serve
                 sgxsd_jni_throw_sgxsd_exception(env, "server_call_fail", call_res);
                 return;
             }
-        } else {
-            (*env)->DeleteGlobalRef(env, p_jni_msg_tag->j_callback_ref);
-            free(p_jni_msg_tag);
-            sgxsd_jni_throw_sgxsd_exception(env, "ecall_fail", call_ecall_res);
-            return;
-        }
+            } else {
+                (*env)->DeleteGlobalRef(env, p_jni_msg_tag->j_callback_ref);
+                free(p_jni_msg_tag);
+                sgxsd_jni_throw_sgxsd_exception(env, "ecall_fail", call_ecall_res);
+                return;
+            }
+	}
+	else {
+	    sgxsd_jni_throw_sgxsd_exception(env, "malloc_fail", errno);
+	    return;
+	}
     } else {
         sgxsd_jni_throw_sgxsd_exception(env, "malloc_fail", errno);
         return;
